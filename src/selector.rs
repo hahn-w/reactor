@@ -15,10 +15,10 @@ pub struct PollSelector {
 
 impl Selector for PollSelector {
 
-    fn add_event(&mut self, event: Event, events: Events, flags: u32) {
-        self.events.insert(event.fd, event);
+    fn add_event(&mut self, event: Event, events: Events, _flags: u32) {
+        unsafe { self.fd_set.set_len(self.nevents + 1) };
 
-        self.fd_set.push(
+        self.fd_set[self.nevents] =
             pollfd {
                 fd: event.fd,
                 events: match events {
@@ -27,31 +27,36 @@ impl Selector for PollSelector {
                 },
                 revents: 0
             }
-        );
+        ;
         self.nevents += 1;
+        self.events.insert(event.fd, event);
     }
 
     fn process_events(&mut self, timeout: i32) {
         unsafe {
-            let ready = poll(self.fd_set.as_mut_ptr(), self.fd_set.len() as u32, timeout);
+            let ready = poll(self.fd_set.as_mut_ptr(), self.nevents as u32, timeout);
 
             for i in 0..ready {
-                let fd = self.fd_set[i as usize].fd;
-                let event = self.events.get(&i).unwrap();
-                let handle = (* event).handle;
-                handle(* event);
+                match self.events.get(&i) {
+                    Some(event) => {
+                        let callback = (* event).handle;
+                        callback(event);
+                    }
+                    None => {
+                    }
+                }
             }
         }
     }
 }
 
 impl PollSelector {
-    pub fn new() -> PollSelector {
-        PollSelector {
+    pub fn new() -> Box<dyn Selector> {
+        Box::new(PollSelector {
             // TODO: 像 malloc 一样申请地址？
             events: HashMap::new(),
             fd_set: Vec::with_capacity(1024),
             nevents: 0
-        }
+        })
     }
 }
